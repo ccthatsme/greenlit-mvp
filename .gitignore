@@ -1,0 +1,40 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Python / Django ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+db.sqlite3
+venv/
+.venv/
+greenlit-backend/venv/
+greenlit-backend/.venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- Node / React ---
+node_modules/
+greenlit-frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Env / Secrets ---
+.env
+.env.*
+!.env.example
+greenlit-backend/.env
+greenlit-frontend/.env
+
+# --- Build artifacts ---
+dist/
+build/
+coverage/
+staticfiles/
