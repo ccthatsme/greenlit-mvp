@@ -1,3 +1,68 @@
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.contrib import admin
+from uuid import UUID
 
-# Create your tests here.
+from users.admin import UserAdmin
+
+
+class UserModelTests(TestCase):
+	def setUp(self):
+		self.User = get_user_model()
+
+	def test_create_user_with_email_success(self):
+		user = self.User.objects.create_user(
+			email='TestUser@Example.COM',
+			password='StrongPass123!'
+		)
+
+		self.assertEqual(user.email, 'TestUser@example.com')
+		self.assertTrue(user.check_password('StrongPass123!'))
+		self.assertTrue(user.is_active)
+		self.assertFalse(user.is_staff)
+		self.assertIsInstance(user.id, UUID)
+
+	def test_create_user_without_email_raises_error(self):
+		with self.assertRaises(ValueError):
+			self.User.objects.create_user(email='', password='StrongPass123!')
+
+	def test_create_superuser_has_required_flags(self):
+		admin_user = self.User.objects.create_superuser(
+			email='admin@example.com',
+			password='AdminPass123!'
+		)
+
+		self.assertTrue(admin_user.is_staff)
+		self.assertTrue(admin_user.is_superuser)
+		self.assertTrue(admin_user.is_active)
+
+	def test_create_superuser_with_invalid_staff_flag_raises_error(self):
+		with self.assertRaises(ValueError):
+			self.User.objects.create_superuser(
+				email='badadmin@example.com',
+				password='AdminPass123!',
+				is_staff=False,
+			)
+
+	def test_string_representation_returns_email(self):
+		user = self.User.objects.create_user(
+			email='person@example.com',
+			password='StrongPass123!'
+		)
+
+		self.assertEqual(str(user), 'person@example.com')
+
+
+class UserAdminTests(TestCase):
+	def setUp(self):
+		self.User = get_user_model()
+
+	def test_user_model_is_registered_in_admin_site(self):
+		self.assertIn(self.User, admin.site._registry)
+
+	def test_user_model_uses_custom_user_admin_class(self):
+		registered_admin = admin.site._registry[self.User]
+
+		self.assertIsInstance(registered_admin, UserAdmin)
+		self.assertIn('email', registered_admin.list_display)
+		self.assertEqual(registered_admin.ordering, ('email',))
