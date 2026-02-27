@@ -1,9 +1,11 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.contrib import admin
+from django.db import IntegrityError
 from uuid import UUID
 
-from users.admin import UserAdmin
+from users.admin import RoleAdmin, UserAdmin, UserRoleAdmin
+from users.models import Role, UserRole
 
 
 class UserModelTests(TestCase):
@@ -66,3 +68,47 @@ class UserAdminTests(TestCase):
 		self.assertIsInstance(registered_admin, UserAdmin)
 		self.assertIn('email', registered_admin.list_display)
 		self.assertEqual(registered_admin.ordering, ('email',))
+
+
+class RoleModelTests(TestCase):
+	def setUp(self):
+		self.User = get_user_model()
+		self.backer_role = Role.objects.create(name=Role.RoleName.BACKER)
+		self.creator_role = Role.objects.create(name=Role.RoleName.CREATOR)
+
+	def test_role_string_representation(self):
+		self.assertEqual(str(self.backer_role), 'BACKER')
+
+	def test_user_can_have_multiple_roles(self):
+		user = self.User.objects.create_user(email='multi@example.com', password='StrongPass123!')
+		UserRole.objects.create(user=user, role=self.backer_role)
+		UserRole.objects.create(user=user, role=self.creator_role)
+
+		role_names = set(user.role_assignments.values_list('role__name', flat=True))
+		self.assertEqual(role_names, {'BACKER', 'CREATOR'})
+
+	def test_duplicate_user_role_assignment_is_blocked(self):
+		user = self.User.objects.create_user(email='dup@example.com', password='StrongPass123!')
+		UserRole.objects.create(user=user, role=self.backer_role)
+
+		with self.assertRaises(IntegrityError):
+			UserRole.objects.create(user=user, role=self.backer_role)
+
+	def test_user_has_role_helper(self):
+		user = self.User.objects.create_user(email='roles@example.com', password='StrongPass123!')
+		UserRole.objects.create(user=user, role=self.creator_role)
+
+		self.assertTrue(user.has_role('CREATOR'))
+		self.assertFalse(user.has_role('ADMIN'))
+
+
+class RoleAdminTests(TestCase):
+	def test_role_model_is_registered_in_admin_site(self):
+		self.assertIn(Role, admin.site._registry)
+
+	def test_user_role_model_is_registered_in_admin_site(self):
+		self.assertIn(UserRole, admin.site._registry)
+
+	def test_role_admin_classes_are_used(self):
+		self.assertIsInstance(admin.site._registry[Role], RoleAdmin)
+		self.assertIsInstance(admin.site._registry[UserRole], UserRoleAdmin)

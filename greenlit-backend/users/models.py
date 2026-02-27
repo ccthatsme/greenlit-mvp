@@ -45,5 +45,45 @@ class User(AbstractBaseUser, PermissionsMixin):
 	USERNAME_FIELD = 'email'
 	REQUIRED_FIELDS = []
 
+	def has_role(self, role_name):
+		return self.role_assignments.filter(role__name=role_name).exists()
+
 	def __str__(self):
 		return self.email
+
+
+class Role(models.Model):
+	class RoleName(models.TextChoices):
+		BACKER = 'BACKER', 'Backer'
+		CREATOR = 'CREATOR', 'Creator'
+		ADMIN = 'ADMIN', 'Admin'
+
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	name = models.CharField(max_length=20, choices=RoleName.choices, unique=True)
+	description = models.CharField(max_length=255, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	def __str__(self):
+		return self.name
+
+
+class UserRole(models.Model):
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='role_assignments')
+	role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='user_assignments')
+	assigned_at = models.DateTimeField(auto_now_add=True)
+	assigned_by = models.ForeignKey(
+		User,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name='roles_assigned'
+	)
+
+	class Meta:
+		constraints = [
+			models.UniqueConstraint(fields=['user', 'role'], name='unique_user_role_assignment'),
+		]
+
+	def __str__(self):
+		return f'{self.user.email} -> {self.role.name}'
