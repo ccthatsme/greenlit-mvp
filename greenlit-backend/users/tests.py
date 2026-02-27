@@ -6,6 +6,7 @@ from uuid import UUID
 
 from users.admin import RoleAdmin, UserAdmin, UserRoleAdmin
 from users.models import Role, UserRole
+from users.services import assign_role_to_user, remove_role_from_user
 
 
 class UserModelTests(TestCase):
@@ -112,3 +113,39 @@ class RoleAdminTests(TestCase):
 	def test_role_admin_classes_are_used(self):
 		self.assertIsInstance(admin.site._registry[Role], RoleAdmin)
 		self.assertIsInstance(admin.site._registry[UserRole], UserRoleAdmin)
+
+
+class RoleServiceTests(TestCase):
+	def setUp(self):
+		self.User = get_user_model()
+		self.user = self.User.objects.create_user(email='service@example.com', password='StrongPass123!')
+		self.admin_user = self.User.objects.create_superuser(email='platform-admin@example.com', password='AdminPass123!')
+		self.backer_role, _ = Role.objects.get_or_create(name=Role.RoleName.BACKER)
+
+	def test_assign_role_to_user_creates_assignment(self):
+		assignment = assign_role_to_user(self.user, Role.RoleName.BACKER, assigned_by=self.admin_user)
+
+		self.assertEqual(assignment.user, self.user)
+		self.assertEqual(assignment.role.name, Role.RoleName.BACKER)
+		self.assertEqual(assignment.assigned_by, self.admin_user)
+		self.assertTrue(self.user.has_role(Role.RoleName.BACKER))
+
+	def test_assign_role_to_user_is_idempotent(self):
+		first = assign_role_to_user(self.user, Role.RoleName.BACKER)
+		second = assign_role_to_user(self.user, Role.RoleName.BACKER)
+
+		self.assertEqual(first.id, second.id)
+		self.assertEqual(UserRole.objects.filter(user=self.user, role=self.backer_role).count(), 1)
+
+	def test_remove_role_from_user_returns_true_when_deleted(self):
+		assign_role_to_user(self.user, Role.RoleName.BACKER)
+
+		removed = remove_role_from_user(self.user, Role.RoleName.BACKER)
+
+		self.assertTrue(removed)
+		self.assertFalse(self.user.has_role(Role.RoleName.BACKER))
+
+	def test_remove_role_from_user_returns_false_when_missing(self):
+		removed = remove_role_from_user(self.user, Role.RoleName.BACKER)
+
+		self.assertFalse(removed)
