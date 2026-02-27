@@ -73,8 +73,8 @@ class UserAdminTests(TestCase):
 class RoleModelTests(TestCase):
 	def setUp(self):
 		self.User = get_user_model()
-		self.backer_role = Role.objects.create(name=Role.RoleName.BACKER)
-		self.creator_role = Role.objects.create(name=Role.RoleName.CREATOR)
+		self.backer_role, _ = Role.objects.get_or_create(name=Role.RoleName.BACKER)
+		self.creator_role, _ = Role.objects.get_or_create(name=Role.RoleName.CREATOR)
 
 	def test_role_string_representation(self):
 		self.assertEqual(str(self.backer_role), 'BACKER')
