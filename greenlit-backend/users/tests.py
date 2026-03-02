@@ -2,7 +2,10 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.contrib import admin
 from django.db import IntegrityError
+from django.urls import reverse
 from uuid import UUID
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from users.admin import RoleAdmin, UserAdmin, UserRoleAdmin
 from users.models import Role, UserRole
@@ -149,3 +152,109 @@ class RoleServiceTests(TestCase):
 		removed = remove_role_from_user(self.user, Role.RoleName.BACKER)
 
 		self.assertFalse(removed)
+
+
+class SignupApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.signup_url = reverse('user-signup')
+
+	def test_signup_creates_user_with_selected_backer_role(self):
+		payload = {
+			'email': 'newbacker@example.com',
+			'password': 'StrongPass123!',
+			'password_confirm': 'StrongPass123!',
+			'first_name': 'Ari',
+			'last_name': 'Lane',
+			'selected_role': Role.RoleName.BACKER,
+		}
+
+		response = self.client.post(self.signup_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		user = get_user_model().objects.get(email='newbacker@example.com')
+		self.assertTrue(user.has_role(Role.RoleName.BACKER))
+		self.assertEqual(response.data['email'], 'newbacker@example.com')
+		self.assertEqual(set(response.data['roles']), {Role.RoleName.BACKER})
+
+	def test_signup_creates_user_with_selected_creator_role(self):
+		payload = {
+			'email': 'creator@example.com',
+			'password': 'StrongPass123!',
+			'password_confirm': 'StrongPass123!',
+			'selected_role': Role.RoleName.CREATOR,
+		}
+
+		response = self.client.post(self.signup_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		user = get_user_model().objects.get(email='creator@example.com')
+		self.assertTrue(user.has_role(Role.RoleName.CREATOR))
+
+	def test_signup_rejects_admin_role_for_public_registration(self):
+		payload = {
+			'email': 'admin-try@example.com',
+			'password': 'StrongPass123!',
+			'password_confirm': 'StrongPass123!',
+			'selected_role': Role.RoleName.ADMIN,
+		}
+
+		response = self.client.post(self.signup_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('selected_role', response.data)
+
+	def test_signup_rejects_password_mismatch(self):
+		payload = {
+			'email': 'mismatch@example.com',
+			'password': 'StrongPass123!',
+			'password_confirm': 'WrongPass123!',
+			'selected_role': Role.RoleName.BACKER,
+		}
+
+		response = self.client.post(self.signup_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn('password_confirm', response.data)
+
+
+class DeleteUserApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.target_user = self.User.objects.create_user(email='target@example.com', password='StrongPass123!')
+		self.other_user = self.User.objects.create_user(email='other@example.com', password='StrongPass123!')
+		self.admin_role_user = self.User.objects.create_user(email='appadmin@example.com', password='StrongPass123!')
+		assign_role_to_user(self.admin_role_user, Role.RoleName.ADMIN)
+
+	def _delete_url(self, user):
+		return reverse('user-delete', kwargs={'user_id': user.id})
+
+	def test_self_delete_succeeds(self):
+		self.client.force_authenticate(user=self.target_user)
+
+		response = self.client.delete(self._delete_url(self.target_user))
+
+		self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+		self.assertFalse(self.User.objects.filter(id=self.target_user.id).exists())
+
+	def test_admin_role_user_can_delete_another_user(self):
+		self.client.force_authenticate(user=self.admin_role_user)
+
+		response = self.client.delete(self._delete_url(self.target_user))
+
+		self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+		self.assertFalse(self.User.objects.filter(id=self.target_user.id).exists())
+
+	def test_non_admin_cannot_delete_another_user(self):
+		self.client.force_authenticate(user=self.other_user)
+
+		response = self.client.delete(self._delete_url(self.target_user))
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+		self.assertTrue(self.User.objects.filter(id=self.target_user.id).exists())
+
+	def test_unauthenticated_delete_is_denied(self):
+		response = self.client.delete(self._delete_url(self.target_user))
+
+		self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
