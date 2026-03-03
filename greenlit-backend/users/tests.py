@@ -258,3 +258,102 @@ class DeleteUserApiTests(TestCase):
 		response = self.client.delete(self._delete_url(self.target_user))
 
 		self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+
+class AuthenticationApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.user = self.User.objects.create_user(
+			email='auth-user@example.com',
+			password='StrongPass123!',
+			first_name='Auth',
+			last_name='User',
+		)
+		assign_role_to_user(self.user, Role.RoleName.BACKER)
+		self.login_url = reverse('token-obtain-pair')
+		self.logout_url = reverse('user-logout')
+		self.refresh_url = reverse('token-refresh')
+		self.me_url = reverse('user-me')
+
+	def test_login_returns_access_and_refresh_tokens(self):
+		payload = {
+			'email': 'auth-user@example.com',
+			'password': 'StrongPass123!',
+		}
+
+		response = self.client.post(self.login_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIn('access', response.data)
+		self.assertIn('refresh', response.data)
+
+	def test_login_rejects_invalid_credentials(self):
+		payload = {
+			'email': 'auth-user@example.com',
+			'password': 'WrongPass123!',
+		}
+
+		response = self.client.post(self.login_url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_refresh_returns_new_access_token(self):
+		login_response = self.client.post(
+			self.login_url,
+			{'email': 'auth-user@example.com', 'password': 'StrongPass123!'},
+			format='json',
+		)
+
+		response = self.client.post(
+			self.refresh_url,
+			{'refresh': login_response.data['refresh']},
+			format='json',
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIn('access', response.data)
+
+	def test_me_endpoint_returns_authenticated_user(self):
+		login_response = self.client.post(
+			self.login_url,
+			{'email': 'auth-user@example.com', 'password': 'StrongPass123!'},
+			format='json',
+		)
+		access_token = login_response.data['access']
+
+		self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['email'], 'auth-user@example.com')
+		self.assertEqual(set(response.data['roles']), {Role.RoleName.BACKER})
+
+	def test_me_endpoint_requires_authentication(self):
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_logout_blacklists_refresh_token(self):
+		login_response = self.client.post(
+			self.login_url,
+			{'email': 'auth-user@example.com', 'password': 'StrongPass123!'},
+			format='json',
+		)
+		access_token = login_response.data['access']
+		refresh_token = login_response.data['refresh']
+
+		self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+		logout_response = self.client.post(self.logout_url, {'refresh': refresh_token}, format='json')
+		self.assertEqual(logout_response.status_code, status.HTTP_205_RESET_CONTENT)
+
+		refresh_response = self.client.post(
+			self.refresh_url,
+			{'refresh': refresh_token},
+			format='json',
+		)
+		self.assertEqual(refresh_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_logout_requires_authentication(self):
+		response = self.client.post(self.logout_url, {'refresh': 'fake-token'}, format='json')
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

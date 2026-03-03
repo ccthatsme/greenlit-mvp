@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from users.models import Role
 from users.services import assign_role_to_user
@@ -47,3 +48,39 @@ class SignupSerializer(serializers.ModelSerializer):
 
     def get_roles(self, obj):
         return list(obj.role_assignments.values_list('role__name', flat=True))
+
+
+class MeSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = get_user_model()
+        fields = [
+            'id',
+            'email',
+            'first_name',
+            'last_name',
+            'phone_number',
+            'date_of_birth',
+            'country',
+            'roles',
+        ]
+
+    def get_roles(self, obj):
+        return list(obj.role_assignments.values_list('role__name', flat=True))
+
+
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
+
+    def validate_refresh(self, value):
+        try:
+            RefreshToken(value)
+        except TokenError as exc:
+            raise serializers.ValidationError('Invalid refresh token.') from exc
+        return value
+
+    def save(self):
+        refresh_token = self.validated_data['refresh']
+        token = RefreshToken(refresh_token)
+        token.blacklist()
