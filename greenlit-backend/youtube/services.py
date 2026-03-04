@@ -1,12 +1,20 @@
 import json
+from django.utils import timezone
+from django.db import IntegrityError
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from django.conf import settings
 
+from youtube.models import CreatorChannel
+
 
 class YouTubeAPIError(Exception):
+    pass
+
+
+class YouTubeConnectError(Exception):
     pass
 
 
@@ -104,3 +112,28 @@ def fetch_public_channel_probe(channel_id, max_videos=5):
         'video_count': _safe_int(statistics.get('videoCount')),
         'recent_videos': recent_videos,
     }
+
+
+def connect_creator_channel(user, channel_id):
+    probe_data = fetch_public_channel_probe(channel_id=channel_id)
+    resolved_channel_id = probe_data.get('channel_id')
+
+    if not resolved_channel_id:
+        raise YouTubeConnectError('Unable to resolve channel ID from YouTube response.')
+
+    try:
+        creator_channel, _ = CreatorChannel.objects.update_or_create(
+            user=user,
+            defaults={
+                'youtube_channel_id': resolved_channel_id,
+                'channel_title': probe_data.get('title') or '',
+                'channel_handle': probe_data.get('custom_url') or '',
+                'last_synced_at': timezone.now(),
+                'sync_status': CreatorChannel.SyncStatus.SUCCESS,
+                'sync_error': '',
+            },
+        )
+    except IntegrityError as exc:
+        raise YouTubeConnectError('This YouTube channel is already connected to another creator.') from exc
+
+    return creator_channel

@@ -23,3 +23,15 @@ class ChannelProbeResponseSerializer(serializers.Serializer):
     view_count = serializers.IntegerField()
     video_count = serializers.IntegerField()
     recent_videos = ChannelVideoSerializer(many=True)
+
+
+class ConnectCreatorChannelSerializer(serializers.Serializer):
+    channel_id = serializers.CharField(max_length=100)
+
+
+class CreatorChannelSummarySerializer(serializers.Serializer):
+    youtube_channel_id = serializers.CharField()
+    channel_title = serializers.CharField(allow_blank=True)
+    channel_handle = serializers.CharField(allow_blank=True)
+    sync_status = serializers.CharField()
+    last_synced_at = serializers.DateTimeField(allow_null=True)
