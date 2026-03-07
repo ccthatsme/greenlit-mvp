@@ -54,6 +54,28 @@ def start_creator_onboarding(user):
     return creator_channel
 
 
+def complete_creator_onboarding(user):
+    if not user.has_role(Role.RoleName.CREATOR):
+        raise YouTubeConnectError('Only creator users can complete creator onboarding.')
+
+    try:
+        creator_channel = CreatorChannel.objects.get(user=user)
+    except CreatorChannel.DoesNotExist as exc:
+        raise YouTubeConnectError('Creator channel does not exist. Start onboarding first.') from exc
+
+    if not creator_channel.youtube_channel_id:
+        raise YouTubeConnectError('Creator channel must be connected before onboarding can be completed.')
+
+    if creator_channel.onboarding_status == CreatorChannel.OnboardingStatus.COMPLETE:
+        return creator_channel
+
+    creator_channel.onboarding_status = CreatorChannel.OnboardingStatus.COMPLETE
+    creator_channel.onboarding_completed_at = timezone.now()
+    creator_channel.save(update_fields=['onboarding_status', 'onboarding_completed_at'])
+
+    return creator_channel
+
+
 def _safe_int(value):
     try:
         return int(value)

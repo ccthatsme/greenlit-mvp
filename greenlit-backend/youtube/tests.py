@@ -10,6 +10,7 @@ from youtube.models import CreatorChannel
 from youtube.services import (
 	YouTubeAPIError,
 	YouTubeConnectError,
+	complete_creator_onboarding,
 	connect_creator_channel,
 	start_creator_onboarding,
 )
@@ -145,6 +146,55 @@ class CreatorChannelServiceTests(TestCase):
 		self.assertEqual(creator_channel.sync_status, CreatorChannel.SyncStatus.SUCCESS)
 		self.assertEqual(creator_channel.onboarding_status, CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED)
 		self.assertIsNotNone(creator_channel.channel_connected_at)
+
+	def test_complete_creator_onboarding_marks_status_complete(self):
+		creator_channel = CreatorChannel.objects.create(
+			user=self.user,
+			youtube_channel_id='UC_COMPLETE_1',
+			onboarding_status=CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+		)
+
+		completed = complete_creator_onboarding(self.user)
+
+		self.assertEqual(completed.id, creator_channel.id)
+		self.assertEqual(completed.onboarding_status, CreatorChannel.OnboardingStatus.COMPLETE)
+		self.assertIsNotNone(completed.onboarding_completed_at)
+
+	def test_complete_creator_onboarding_is_idempotent(self):
+		creator_channel = CreatorChannel.objects.create(
+			user=self.user,
+			youtube_channel_id='UC_COMPLETE_2',
+			onboarding_status=CreatorChannel.OnboardingStatus.COMPLETE,
+		)
+		initial_timestamp = creator_channel.onboarding_completed_at
+
+		first = complete_creator_onboarding(self.user)
+		second = complete_creator_onboarding(self.user)
+
+		self.assertEqual(first.id, second.id)
+		self.assertEqual(second.onboarding_status, CreatorChannel.OnboardingStatus.COMPLETE)
+		self.assertEqual(second.onboarding_completed_at, initial_timestamp)
+
+	def test_complete_creator_onboarding_rejects_non_creator(self):
+		with self.assertRaisesMessage(YouTubeConnectError, 'Only creator users can complete creator onboarding.'):
+			complete_creator_onboarding(self.backer_user)
+
+	def test_complete_creator_onboarding_requires_creator_channel(self):
+		with self.assertRaisesMessage(YouTubeConnectError, 'Creator channel does not exist. Start onboarding first.'):
+			complete_creator_onboarding(self.user)
+
+	def test_complete_creator_onboarding_requires_connected_channel_id(self):
+		CreatorChannel.objects.create(
+			user=self.user,
+			youtube_channel_id=None,
+			onboarding_status=CreatorChannel.OnboardingStatus.STARTED,
+		)
+
+		with self.assertRaisesMessage(
+			YouTubeConnectError,
+			'Creator channel must be connected before onboarding can be completed.',
+		):
+			complete_creator_onboarding(self.user)
 
 
 class ConnectCreatorChannelApiTests(TestCase):
