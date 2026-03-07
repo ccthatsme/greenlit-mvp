@@ -35,3 +35,7 @@ class CreatorChannelSummarySerializer(serializers.Serializer):
     channel_handle = serializers.CharField(allow_blank=True)
     sync_status = serializers.CharField()
     last_synced_at = serializers.DateTimeField(allow_null=True)
+    onboarding_status = serializers.CharField()
+    onboarding_started_at = serializers.DateTimeField(allow_null=True)
+    channel_connected_at = serializers.DateTimeField(allow_null=True)
+    onboarding_completed_at = serializers.DateTimeField(allow_null=True)

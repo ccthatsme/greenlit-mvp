@@ -7,7 +7,12 @@ from rest_framework.test import APIClient
 from unittest.mock import patch
 
 from youtube.models import CreatorChannel
-from youtube.services import YouTubeAPIError, connect_creator_channel
+from youtube.services import (
+	YouTubeAPIError,
+	YouTubeConnectError,
+	connect_creator_channel,
+	start_creator_onboarding,
+)
 from users.models import Role
 from users.services import assign_role_to_user
 
@@ -77,6 +82,8 @@ class CreatorChannelModelTests(TestCase):
 		self.assertEqual(creator_channel.user, user)
 		self.assertEqual(creator_channel.youtube_channel_id, 'UC_CREATOR_1')
 		self.assertEqual(creator_channel.sync_status, CreatorChannel.SyncStatus.PENDING)
+		self.assertEqual(creator_channel.onboarding_status, CreatorChannel.OnboardingStatus.STARTED)
+		self.assertIsNotNone(creator_channel.onboarding_started_at)
 
 	def test_user_cannot_have_more_than_one_creator_channel(self):
 		user = self.User.objects.create_user(email='creator2@example.com', password='StrongPass123!')
@@ -99,6 +106,28 @@ class CreatorChannelServiceTests(TestCase):
 	def setUp(self):
 		self.User = get_user_model()
 		self.user = self.User.objects.create_user(email='svc-creator@example.com', password='StrongPass123!')
+		self.backer_user = self.User.objects.create_user(email='svc-backer@example.com', password='StrongPass123!')
+		assign_role_to_user(self.user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+
+	def test_start_creator_onboarding_creates_channel_anchor_for_creator(self):
+		creator_channel = start_creator_onboarding(self.user)
+
+		self.assertEqual(creator_channel.user, self.user)
+		self.assertIsNone(creator_channel.youtube_channel_id)
+		self.assertEqual(creator_channel.onboarding_status, CreatorChannel.OnboardingStatus.STARTED)
+		self.assertIsNotNone(creator_channel.onboarding_started_at)
+
+	def test_start_creator_onboarding_rejects_non_creator(self):
+		with self.assertRaisesMessage(YouTubeConnectError, 'Only creator users can start creator onboarding.'):
+			start_creator_onboarding(self.backer_user)
+
+	def test_start_creator_onboarding_is_idempotent(self):
+		first = start_creator_onboarding(self.user)
+		second = start_creator_onboarding(self.user)
+
+		self.assertEqual(first.id, second.id)
+		self.assertEqual(CreatorChannel.objects.filter(user=self.user).count(), 1)
 
 	@patch('youtube.services.fetch_public_channel_probe')
 	def test_connect_creator_channel_creates_channel(self, mock_probe):
@@ -114,6 +143,8 @@ class CreatorChannelServiceTests(TestCase):
 		self.assertEqual(creator_channel.channel_title, 'Service Creator Channel')
 		self.assertEqual(creator_channel.channel_handle, '@servicecreator')
 		self.assertEqual(creator_channel.sync_status, CreatorChannel.SyncStatus.SUCCESS)
+		self.assertEqual(creator_channel.onboarding_status, CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED)
+		self.assertIsNotNone(creator_channel.channel_connected_at)
 
 
 class ConnectCreatorChannelApiTests(TestCase):

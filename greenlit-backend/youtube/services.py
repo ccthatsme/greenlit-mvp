@@ -8,6 +8,7 @@ from urllib.request import urlopen
 from django.conf import settings
 
 from youtube.models import CreatorChannel
+from users.models import Role
 
 
 class YouTubeAPIError(Exception):
@@ -16,6 +17,41 @@ class YouTubeAPIError(Exception):
 
 class YouTubeConnectError(Exception):
     pass
+
+
+def start_creator_onboarding(user):
+    if not user.has_role(Role.RoleName.CREATOR):
+        raise YouTubeConnectError('Only creator users can start creator onboarding.')
+
+    creator_channel, created = CreatorChannel.objects.get_or_create(
+        user=user,
+        defaults={
+            'onboarding_status': CreatorChannel.OnboardingStatus.STARTED,
+            'onboarding_started_at': timezone.now(),
+            'sync_status': CreatorChannel.SyncStatus.PENDING,
+            'sync_error': '',
+        },
+    )
+
+    if created:
+        return creator_channel
+
+    if creator_channel.onboarding_status == CreatorChannel.OnboardingStatus.COMPLETE:
+        return creator_channel
+
+    fields_to_update = []
+    if creator_channel.onboarding_status != CreatorChannel.OnboardingStatus.STARTED:
+        creator_channel.onboarding_status = CreatorChannel.OnboardingStatus.STARTED
+        fields_to_update.append('onboarding_status')
+
+    if creator_channel.onboarding_started_at is None:
+        creator_channel.onboarding_started_at = timezone.now()
+        fields_to_update.append('onboarding_started_at')
+
+    if fields_to_update:
+        creator_channel.save(update_fields=fields_to_update)
+
+    return creator_channel
 
 
 def _safe_int(value):
@@ -115,6 +151,8 @@ def fetch_public_channel_probe(channel_id, max_videos=5):
 
 
 def connect_creator_channel(user, channel_id):
+    start_creator_onboarding(user)
+
     probe_data = fetch_public_channel_probe(channel_id=channel_id)
     resolved_channel_id = probe_data.get('channel_id')
 
@@ -131,6 +169,8 @@ def connect_creator_channel(user, channel_id):
                 'last_synced_at': timezone.now(),
                 'sync_status': CreatorChannel.SyncStatus.SUCCESS,
                 'sync_error': '',
+                'onboarding_status': CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+                'channel_connected_at': timezone.now(),
             },
         )
     except IntegrityError as exc:
