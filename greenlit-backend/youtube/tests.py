@@ -12,6 +12,7 @@ from youtube.services import (
 	YouTubeConnectError,
 	complete_creator_onboarding,
 	connect_creator_channel,
+	get_creator_onboarding_summary,
 	start_creator_onboarding,
 )
 from users.models import Role
@@ -195,6 +196,53 @@ class CreatorChannelServiceTests(TestCase):
 			'Creator channel must be connected before onboarding can be completed.',
 		):
 			complete_creator_onboarding(self.user)
+
+	def test_get_creator_onboarding_summary_rejects_non_creator(self):
+		with self.assertRaisesMessage(YouTubeConnectError, 'Only creator users can access creator onboarding summary.'):
+			get_creator_onboarding_summary(self.backer_user)
+
+	def test_get_creator_onboarding_summary_returns_defaults_when_channel_missing(self):
+		summary = get_creator_onboarding_summary(self.user)
+
+		self.assertEqual(summary['youtube_channel_id'], '')
+		self.assertEqual(summary['channel_title'], '')
+		self.assertEqual(summary['channel_handle'], '')
+		self.assertEqual(summary['sync_status'], CreatorChannel.SyncStatus.PENDING)
+		self.assertEqual(summary['onboarding_status'], CreatorChannel.OnboardingStatus.STARTED)
+		self.assertIsNone(summary['last_synced_at'])
+		self.assertIsNone(summary['onboarding_started_at'])
+		self.assertIsNone(summary['channel_connected_at'])
+		self.assertIsNone(summary['onboarding_completed_at'])
+
+	def test_get_creator_onboarding_summary_returns_existing_channel_values(self):
+		creator_channel = CreatorChannel.objects.create(
+			user=self.user,
+			youtube_channel_id='UC_SUMMARY_1',
+			channel_title='Summary Channel',
+			channel_handle='@summary',
+			sync_status=CreatorChannel.SyncStatus.SUCCESS,
+			onboarding_status=CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+		)
+
+		summary = get_creator_onboarding_summary(self.user)
+
+		self.assertEqual(summary['youtube_channel_id'], 'UC_SUMMARY_1')
+		self.assertEqual(summary['channel_title'], 'Summary Channel')
+		self.assertEqual(summary['channel_handle'], '@summary')
+		self.assertEqual(summary['sync_status'], CreatorChannel.SyncStatus.SUCCESS)
+		self.assertEqual(summary['onboarding_status'], CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED)
+		self.assertEqual(summary['onboarding_started_at'], creator_channel.onboarding_started_at)
+
+	def test_get_creator_onboarding_summary_normalizes_null_channel_id_to_empty_string(self):
+		CreatorChannel.objects.create(
+			user=self.user,
+			youtube_channel_id=None,
+			onboarding_status=CreatorChannel.OnboardingStatus.STARTED,
+		)
+
+		summary = get_creator_onboarding_summary(self.user)
+
+		self.assertEqual(summary['youtube_channel_id'], '')
 
 
 class ConnectCreatorChannelApiTests(TestCase):
