@@ -244,3 +244,100 @@ class ConnectCreatorChannelApiTests(TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data['detail'], 'Channel not found for the provided channel_id.')
+
+
+class CompleteCreatorOnboardingApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.complete_url = reverse('youtube-complete-onboarding')
+		self.creator_user = self.User.objects.create_user(email='complete-creator@example.com', password='StrongPass123!')
+		self.backer_user = self.User.objects.create_user(email='complete-backer@example.com', password='StrongPass123!')
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+
+	def test_creator_can_complete_onboarding_after_channel_connected(self):
+		CreatorChannel.objects.create(
+			user=self.creator_user,
+			youtube_channel_id='UC_ONBOARD_1',
+			onboarding_status=CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+		)
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.complete_url, {}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['onboarding_status'], CreatorChannel.OnboardingStatus.COMPLETE)
+		self.assertIsNotNone(response.data['onboarding_completed_at'])
+
+	def test_non_creator_cannot_complete_onboarding(self):
+		self.client.force_authenticate(user=self.backer_user)
+		response = self.client.post(self.complete_url, {}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_completion_returns_400_when_channel_not_connected(self):
+		CreatorChannel.objects.create(
+			user=self.creator_user,
+			youtube_channel_id=None,
+			onboarding_status=CreatorChannel.OnboardingStatus.STARTED,
+		)
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.complete_url, {}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(
+			response.data['detail'],
+			'Creator channel must be connected before onboarding can be completed.',
+		)
+
+
+class CreatorOnboardingMeApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.me_url = reverse('youtube-onboarding-me')
+		self.creator_user = self.User.objects.create_user(email='me-creator@example.com', password='StrongPass123!')
+		self.backer_user = self.User.objects.create_user(email='me-backer@example.com', password='StrongPass123!')
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+
+	def test_creator_with_connected_channel_gets_summary(self):
+		CreatorChannel.objects.create(
+			user=self.creator_user,
+			youtube_channel_id='UC_ME_1',
+			channel_title='Me Channel',
+			channel_handle='@mechannel',
+			sync_status=CreatorChannel.SyncStatus.SUCCESS,
+			onboarding_status=CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+		)
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['youtube_channel_id'], 'UC_ME_1')
+		self.assertEqual(response.data['channel_title'], 'Me Channel')
+		self.assertEqual(response.data['onboarding_status'], CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED)
+
+	def test_creator_without_channel_gets_default_summary(self):
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['youtube_channel_id'], '')
+		self.assertEqual(response.data['sync_status'], CreatorChannel.SyncStatus.PENDING)
+		self.assertEqual(response.data['onboarding_status'], CreatorChannel.OnboardingStatus.STARTED)
+		self.assertIsNone(response.data['onboarding_started_at'])
+
+	def test_non_creator_cannot_access_onboarding_me(self):
+		self.client.force_authenticate(user=self.backer_user)
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_unauthenticated_user_cannot_access_onboarding_me(self):
+		response = self.client.get(self.me_url)
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

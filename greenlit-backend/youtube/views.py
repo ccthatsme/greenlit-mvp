@@ -13,8 +13,10 @@ from youtube.serializers import (
 from youtube.services import (
 	YouTubeAPIError,
 	YouTubeConnectError,
+	complete_creator_onboarding,
 	connect_creator_channel,
 	fetch_public_channel_probe,
+	get_creator_onboarding_summary,
 )
 
 
@@ -53,3 +55,26 @@ class ConnectCreatorChannelView(APIView):
 
 		response_serializer = CreatorChannelSummarySerializer(creator_channel)
 		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class CompleteCreatorOnboardingView(APIView):
+	permission_classes = [IsCreatorUser]
+
+	def post(self, request):
+		try:
+			creator_channel = complete_creator_onboarding(user=request.user)
+		except YouTubeConnectError as exc:
+			return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+		response_serializer = CreatorChannelSummarySerializer(creator_channel)
+		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class CreatorOnboardingMeView(APIView):
+	permission_classes = [IsCreatorUser]
+
+	def get(self, request):
+		summary_data = get_creator_onboarding_summary(user=request.user)
+		response_serializer = CreatorChannelSummarySerializer(data=summary_data)
+		response_serializer.is_valid(raise_exception=True)
+		return Response(response_serializer.validated_data, status=status.HTTP_200_OK)

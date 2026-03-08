@@ -30,7 +30,7 @@ class ConnectCreatorChannelSerializer(serializers.Serializer):
 
 
 class CreatorChannelSummarySerializer(serializers.Serializer):
-    youtube_channel_id = serializers.CharField()
+    youtube_channel_id = serializers.CharField(allow_blank=True)
     channel_title = serializers.CharField(allow_blank=True)
     channel_handle = serializers.CharField(allow_blank=True)
     sync_status = serializers.CharField()

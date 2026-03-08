@@ -199,3 +199,35 @@ def connect_creator_channel(user, channel_id):
         raise YouTubeConnectError('This YouTube channel is already connected to another creator.') from exc
 
     return creator_channel
+
+
+def get_creator_onboarding_summary(user):
+    if not user.has_role(Role.RoleName.CREATOR):
+        raise YouTubeConnectError('Only creator users can access creator onboarding summary.')
+
+    try:
+        creator_channel = CreatorChannel.objects.get(user=user)
+    except CreatorChannel.DoesNotExist:
+        return {
+            'youtube_channel_id': '',
+            'channel_title': '',
+            'channel_handle': '',
+            'sync_status': CreatorChannel.SyncStatus.PENDING,
+            'last_synced_at': None,
+            'onboarding_status': CreatorChannel.OnboardingStatus.STARTED,
+            'onboarding_started_at': None,
+            'channel_connected_at': None,
+            'onboarding_completed_at': None,
+        }
+
+    return {
+        'youtube_channel_id': creator_channel.youtube_channel_id or '',
+        'channel_title': creator_channel.channel_title or '',
+        'channel_handle': creator_channel.channel_handle or '',
+        'sync_status': creator_channel.sync_status,
+        'last_synced_at': creator_channel.last_synced_at,
+        'onboarding_status': creator_channel.onboarding_status,
+        'onboarding_started_at': creator_channel.onboarding_started_at,
+        'channel_connected_at': creator_channel.channel_connected_at,
+        'onboarding_completed_at': creator_channel.onboarding_completed_at,
+    }
