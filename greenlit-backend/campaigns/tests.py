@@ -1,6 +1,9 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from campaigns.models import Campaign
 from campaigns.serializers import CampaignSummarySerializer, CreateCampaignSerializer
@@ -236,4 +239,79 @@ class CampaignSerializerTests(TestCase):
 		self.assertEqual(serializer.data['title'], 'Serializer Campaign')
 		self.assertEqual(serializer.data['currency'], 'USD')
 		self.assertEqual(serializer.data['status'], Campaign.Status.DRAFT)
+
+
+class CreateCampaignApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.url = reverse('campaign-create')
+		self.creator_user = self.User.objects.create_user(
+			email='api-campaign-creator@example.com',
+			password='StrongPass123!',
+		)
+		self.backer_user = self.User.objects.create_user(
+			email='api-campaign-backer@example.com',
+			password='StrongPass123!',
+		)
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+
+	def test_creator_with_connected_channel_can_create_campaign(self):
+		CreatorChannel.objects.create(
+			user=self.creator_user,
+			onboarding_status=CreatorChannel.OnboardingStatus.CHANNEL_CONNECTED,
+		)
+		payload = {
+			'title': 'Fund Episode Two',
+			'summary': 'Help cover production and editing costs.',
+			'funding_goal_cents': 600000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=25)).isoformat(),
+		}
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertEqual(response.data['title'], 'Fund Episode Two')
+		self.assertEqual(response.data['status'], Campaign.Status.DRAFT)
+
+	def test_creator_without_connected_channel_gets_400(self):
+		payload = {
+			'title': 'Fund Episode Three',
+			'summary': 'Need support for production.',
+			'funding_goal_cents': 300000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=20)).isoformat(),
+		}
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'You must connect your YouTube channel before creating a campaign.')
+
+	def test_non_creator_cannot_create_campaign(self):
+		payload = {
+			'title': 'Backer Trying Campaign',
+			'summary': 'Should not pass creator permissions.',
+			'funding_goal_cents': 300000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=20)).isoformat(),
+		}
+
+		self.client.force_authenticate(user=self.backer_user)
+		response = self.client.post(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_unauthenticated_cannot_create_campaign(self):
+		payload = {
+			'title': 'Anonymous Campaign',
+			'summary': 'Should require authentication.',
+			'funding_goal_cents': 300000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=20)).isoformat(),
+		}
+
+		response = self.client.post(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
