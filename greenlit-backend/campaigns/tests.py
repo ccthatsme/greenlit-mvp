@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from campaigns.models import Campaign
+from campaigns.serializers import CampaignSummarySerializer, CreateCampaignSerializer
 from campaigns.services import (
 	CampaignConflictError,
 	CampaignOnboardingError,
@@ -189,4 +190,50 @@ class CampaignServiceTests(TestCase):
 				funding_goal_cents=200000,
 				deadline_at=timezone.now() + timezone.timedelta(days=30),
 			)
+
+
+class CampaignSerializerTests(TestCase):
+	def test_create_campaign_serializer_valid_payload(self):
+		payload = {
+			'title': 'Launch My Next Episode',
+			'summary': 'Funding editing, sound design, and graphics.',
+			'funding_goal_cents': 450000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=20)).isoformat(),
+		}
+
+		serializer = CreateCampaignSerializer(data=payload)
+
+		self.assertTrue(serializer.is_valid(), serializer.errors)
+
+	def test_create_campaign_serializer_rejects_invalid_goal(self):
+		payload = {
+			'title': 'Invalid Goal Campaign',
+			'summary': 'Invalid campaign payload test.',
+			'funding_goal_cents': 0,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=10)).isoformat(),
+		}
+
+		serializer = CreateCampaignSerializer(data=payload)
+
+		self.assertFalse(serializer.is_valid())
+		self.assertIn('funding_goal_cents', serializer.errors)
+
+	def test_campaign_summary_serializer_returns_model_fields(self):
+		user = get_user_model().objects.create_user(
+			email='serializer-creator@example.com',
+			password='StrongPass123!',
+		)
+		campaign = Campaign.objects.create(
+			creator=user,
+			title='Serializer Campaign',
+			summary='Serializer output verification.',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=15),
+		)
+
+		serializer = CampaignSummarySerializer(campaign)
+
+		self.assertEqual(serializer.data['title'], 'Serializer Campaign')
+		self.assertEqual(serializer.data['currency'], 'USD')
+		self.assertEqual(serializer.data['status'], Campaign.Status.DRAFT)
 
