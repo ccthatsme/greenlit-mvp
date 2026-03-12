@@ -493,3 +493,80 @@ class CreateCampaignApiTests(TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+
+class UpdateCampaignApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.creator_user = self.User.objects.create_user(
+			email='api-update-creator@example.com',
+			password='StrongPass123!',
+		)
+		self.other_creator_user = self.User.objects.create_user(
+			email='api-update-other-creator@example.com',
+			password='StrongPass123!',
+		)
+		self.backer_user = self.User.objects.create_user(
+			email='api-update-backer@example.com',
+			password='StrongPass123!',
+		)
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.other_creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+		self.campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Original Campaign Title',
+			summary='Original campaign summary.',
+			funding_goal_cents=400000,
+			deadline_at=timezone.now() + timezone.timedelta(days=30),
+		)
+		self.url = reverse('campaign-update', kwargs={'campaign_id': self.campaign.id})
+
+	def test_owner_can_patch_draft_campaign(self):
+		payload = {
+			'title': 'Updated Campaign Title',
+			'funding_goal_cents': 450000,
+		}
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.patch(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['title'], 'Updated Campaign Title')
+		self.assertEqual(response.data['funding_goal_cents'], 450000)
+
+	def test_unauthenticated_cannot_patch_campaign(self):
+		response = self.client.patch(self.url, {'title': 'No Auth'}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_non_creator_cannot_patch_campaign(self):
+		self.client.force_authenticate(user=self.backer_user)
+		response = self.client.patch(self.url, {'title': 'Backer Update'}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_non_owner_creator_cannot_patch_campaign(self):
+		self.client.force_authenticate(user=self.other_creator_user)
+		response = self.client.patch(self.url, {'title': 'Not Owner Update'}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+		self.assertEqual(response.data['detail'], 'You do not have permission to update this campaign.')
+
+	def test_patch_rejects_non_draft_campaign(self):
+		self.campaign.status = Campaign.Status.ACTIVE
+		self.campaign.save(update_fields=['status'])
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.patch(self.url, {'title': 'Should Fail'}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'Only draft campaigns can be updated.')
+
+	def test_patch_rejects_empty_payload(self):
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.patch(self.url, {}, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'At least one campaign field must be provided for update.')
+
