@@ -290,6 +290,24 @@ class CreateCampaignApiTests(TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data['detail'], 'You must connect your YouTube channel before creating a campaign.')
 
+	def test_creator_with_started_onboarding_gets_400_with_exact_message(self):
+		CreatorChannel.objects.create(
+			user=self.creator_user,
+			onboarding_status=CreatorChannel.OnboardingStatus.STARTED,
+		)
+		payload = {
+			'title': 'Started Onboarding Campaign',
+			'summary': 'This should be blocked until channel connection is completed.',
+			'funding_goal_cents': 350000,
+			'deadline_at': (timezone.now() + timezone.timedelta(days=20)).isoformat(),
+		}
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url, payload, format='json')
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'You must complete channel connection before creating a campaign.')
+
 	def test_non_creator_cannot_create_campaign(self):
 		payload = {
 			'title': 'Backer Trying Campaign',
