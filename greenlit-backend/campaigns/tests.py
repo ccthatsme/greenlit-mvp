@@ -14,6 +14,7 @@ from campaigns.services import (
 	CampaignValidationError,
 	assert_creator_can_create_campaign,
 	create_campaign,
+	update_campaign,
 )
 from users.models import Role
 from users.services import assign_role_to_user
@@ -192,6 +193,140 @@ class CampaignServiceTests(TestCase):
 				summary='This should be blocked',
 				funding_goal_cents=200000,
 				deadline_at=timezone.now() + timezone.timedelta(days=30),
+			)
+
+	def test_update_campaign_success_for_owner_draft(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Original Title',
+			summary='Original summary',
+			funding_goal_cents=300000,
+			deadline_at=timezone.now() + timezone.timedelta(days=30),
+		)
+		new_deadline = timezone.now() + timezone.timedelta(days=45)
+
+		updated = update_campaign(
+			self.creator_user,
+			campaign_id=campaign.id,
+			title='  Updated Title  ',
+			summary='  Updated summary text.  ',
+			funding_goal_cents=450000,
+			deadline_at=new_deadline,
+		)
+
+		self.assertEqual(updated.title, 'Updated Title')
+		self.assertEqual(updated.summary, 'Updated summary text.')
+		self.assertEqual(updated.funding_goal_cents, 450000)
+		self.assertEqual(updated.deadline_at, new_deadline)
+
+	def test_update_campaign_rejects_non_creator(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Creator Campaign',
+			summary='Owned by creator',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+		)
+
+		with self.assertRaisesMessage(CampaignPermissionError, 'Only creator users can update campaigns.'):
+			update_campaign(
+				self.backer_user,
+				campaign_id=campaign.id,
+				title='Should Fail',
+			)
+
+	def test_update_campaign_rejects_non_owner(self):
+		other_creator = self.User.objects.create_user(
+			email='other-creator@example.com',
+			password='StrongPass123!',
+		)
+		assign_role_to_user(other_creator, Role.RoleName.CREATOR)
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Creator Campaign',
+			summary='Owner only update.',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+		)
+
+		with self.assertRaisesMessage(CampaignPermissionError, 'You do not have permission to update this campaign.'):
+			update_campaign(
+				other_creator,
+				campaign_id=campaign.id,
+				title='Should Fail',
+			)
+
+	def test_update_campaign_rejects_non_draft_campaign(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Active Campaign',
+			summary='No updates when active',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+			status=Campaign.Status.ACTIVE,
+		)
+
+		with self.assertRaisesMessage(CampaignConflictError, 'Only draft campaigns can be updated.'):
+			update_campaign(
+				self.creator_user,
+				campaign_id=campaign.id,
+				title='Should Fail',
+			)
+
+	def test_update_campaign_requires_at_least_one_field(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Draft Campaign',
+			summary='No-op update test',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+		)
+
+		with self.assertRaisesMessage(
+			CampaignValidationError,
+			'At least one campaign field must be provided for update.',
+		):
+			update_campaign(
+				self.creator_user,
+				campaign_id=campaign.id,
+			)
+
+	def test_update_campaign_rejects_invalid_goal(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Draft Campaign',
+			summary='Invalid goal update test',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+		)
+
+		with self.assertRaisesMessage(
+			CampaignValidationError,
+			'Funding goal must be a positive integer amount in cents.',
+		):
+			update_campaign(
+				self.creator_user,
+				campaign_id=campaign.id,
+				funding_goal_cents=0,
+			)
+
+	def test_update_campaign_rejects_past_deadline(self):
+		campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Draft Campaign',
+			summary='Past deadline update test',
+			funding_goal_cents=250000,
+			deadline_at=timezone.now() + timezone.timedelta(days=20),
+		)
+
+		with self.assertRaisesMessage(
+			CampaignValidationError,
+			'Campaign deadline must be in the future.',
+		):
+			update_campaign(
+				self.creator_user,
+				campaign_id=campaign.id,
+				deadline_at=timezone.now() - timezone.timedelta(days=1),
 			)
 
 
