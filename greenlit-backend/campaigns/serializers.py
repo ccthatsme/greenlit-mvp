@@ -10,6 +10,13 @@ class CreateCampaignSerializer(serializers.Serializer):
 	deadline_at = serializers.DateTimeField()
 
 
+class UpdateCampaignSerializer(serializers.Serializer):
+	title = serializers.CharField(max_length=120, required=False)
+	summary = serializers.CharField(max_length=500, required=False)
+	funding_goal_cents = serializers.IntegerField(min_value=1, required=False)
+	deadline_at = serializers.DateTimeField(required=False)
+
+
 class CampaignSummarySerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Campaign

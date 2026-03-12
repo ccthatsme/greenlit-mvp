@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from campaigns.models import Campaign
-from campaigns.serializers import CampaignSummarySerializer, CreateCampaignSerializer
+from campaigns.serializers import CampaignSummarySerializer, CreateCampaignSerializer, UpdateCampaignSerializer
 from campaigns.services import (
 	CampaignConflictError,
 	CampaignOnboardingError,
@@ -374,6 +374,31 @@ class CampaignSerializerTests(TestCase):
 		self.assertEqual(serializer.data['title'], 'Serializer Campaign')
 		self.assertEqual(serializer.data['currency'], 'USD')
 		self.assertEqual(serializer.data['status'], Campaign.Status.DRAFT)
+
+	def test_update_campaign_serializer_valid_partial_payload(self):
+		payload = {
+			'title': 'Updated Campaign Title',
+			'funding_goal_cents': 550000,
+		}
+
+		serializer = UpdateCampaignSerializer(data=payload)
+
+		self.assertTrue(serializer.is_valid(), serializer.errors)
+
+	def test_update_campaign_serializer_rejects_invalid_goal(self):
+		payload = {
+			'funding_goal_cents': 0,
+		}
+
+		serializer = UpdateCampaignSerializer(data=payload)
+
+		self.assertFalse(serializer.is_valid())
+		self.assertIn('funding_goal_cents', serializer.errors)
+
+	def test_update_campaign_serializer_allows_empty_object_for_service_layer_validation(self):
+		serializer = UpdateCampaignSerializer(data={})
+
+		self.assertTrue(serializer.is_valid(), serializer.errors)
 
 
 class CreateCampaignApiTests(TestCase):
