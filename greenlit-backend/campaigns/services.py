@@ -154,3 +154,26 @@ def update_campaign(
 
 	campaign.save(update_fields=[*validated_data.keys(), 'updated_at'])
 	return campaign
+
+
+def publish_campaign(user, *, campaign_id):
+	if not user.has_role(Role.RoleName.CREATOR):
+		raise CampaignPermissionError('Only creator users can publish campaigns.')
+
+	try:
+		campaign = Campaign.objects.get(id=campaign_id)
+	except Campaign.DoesNotExist as exc:
+		raise CampaignValidationError('Campaign does not exist.') from exc
+
+	if campaign.creator_id != user.id:
+		raise CampaignPermissionError('You do not have permission to publish this campaign.')
+
+	if campaign.status != Campaign.Status.DRAFT:
+		raise CampaignConflictError('Only draft campaigns can be published.')
+
+	if campaign.deadline_at <= timezone.now():
+		raise CampaignValidationError('Cannot publish a campaign with a past deadline.')
+
+	campaign.status = Campaign.Status.ACTIVE
+	campaign.save(update_fields=['status', 'updated_at'])
+	return campaign

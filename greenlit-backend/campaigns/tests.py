@@ -14,6 +14,7 @@ from campaigns.services import (
 	CampaignValidationError,
 	assert_creator_can_create_campaign,
 	create_campaign,
+	publish_campaign,
 	update_campaign,
 )
 from users.models import Role
@@ -330,6 +331,72 @@ class CampaignServiceTests(TestCase):
 			)
 
 
+class PublishCampaignServiceTests(TestCase):
+	def setUp(self):
+		self.User = get_user_model()
+		self.creator_user = self.User.objects.create_user(
+			email='svc-publish-creator@example.com',
+			password='StrongPass123!',
+		)
+		self.other_creator_user = self.User.objects.create_user(
+			email='svc-publish-other@example.com',
+			password='StrongPass123!',
+		)
+		self.backer_user = self.User.objects.create_user(
+			email='svc-publish-backer@example.com',
+			password='StrongPass123!',
+		)
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.other_creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+		self.campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Draft Campaign',
+			summary='Ready to publish.',
+			funding_goal_cents=500000,
+			deadline_at=timezone.now() + timezone.timedelta(days=30),
+		)
+
+	def test_publish_campaign_transitions_draft_to_active(self):
+		campaign = publish_campaign(self.creator_user, campaign_id=self.campaign.id)
+
+		self.assertEqual(campaign.status, Campaign.Status.ACTIVE)
+
+	def test_publish_campaign_rejects_non_creator(self):
+		with self.assertRaisesMessage(CampaignPermissionError, 'Only creator users can publish campaigns.'):
+			publish_campaign(self.backer_user, campaign_id=self.campaign.id)
+
+	def test_publish_campaign_rejects_non_owner(self):
+		with self.assertRaisesMessage(CampaignPermissionError, 'You do not have permission to publish this campaign.'):
+			publish_campaign(self.other_creator_user, campaign_id=self.campaign.id)
+
+	def test_publish_campaign_rejects_already_active_campaign(self):
+		self.campaign.status = Campaign.Status.ACTIVE
+		self.campaign.save(update_fields=['status'])
+
+		with self.assertRaisesMessage(CampaignConflictError, 'Only draft campaigns can be published.'):
+			publish_campaign(self.creator_user, campaign_id=self.campaign.id)
+
+	def test_publish_campaign_rejects_closed_campaign(self):
+		self.campaign.status = Campaign.Status.CLOSED
+		self.campaign.save(update_fields=['status'])
+
+		with self.assertRaisesMessage(CampaignConflictError, 'Only draft campaigns can be published.'):
+			publish_campaign(self.creator_user, campaign_id=self.campaign.id)
+
+	def test_publish_campaign_rejects_past_deadline(self):
+		self.campaign.deadline_at = timezone.now() - timezone.timedelta(days=1)
+		self.campaign.save(update_fields=['deadline_at'])
+
+		with self.assertRaisesMessage(CampaignValidationError, 'Cannot publish a campaign with a past deadline.'):
+			publish_campaign(self.creator_user, campaign_id=self.campaign.id)
+
+	def test_publish_campaign_rejects_nonexistent_campaign(self):
+		import uuid
+		with self.assertRaisesMessage(CampaignValidationError, 'Campaign does not exist.'):
+			publish_campaign(self.creator_user, campaign_id=uuid.uuid4())
+
+
 class CampaignSerializerTests(TestCase):
 	def test_create_campaign_serializer_valid_payload(self):
 		payload = {
@@ -569,4 +636,78 @@ class UpdateCampaignApiTests(TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data['detail'], 'At least one campaign field must be provided for update.')
+
+
+class PublishCampaignApiTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.User = get_user_model()
+		self.creator_user = self.User.objects.create_user(
+			email='api-publish-creator@example.com',
+			password='StrongPass123!',
+		)
+		self.other_creator_user = self.User.objects.create_user(
+			email='api-publish-other@example.com',
+			password='StrongPass123!',
+		)
+		self.backer_user = self.User.objects.create_user(
+			email='api-publish-backer@example.com',
+			password='StrongPass123!',
+		)
+		assign_role_to_user(self.creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.other_creator_user, Role.RoleName.CREATOR)
+		assign_role_to_user(self.backer_user, Role.RoleName.BACKER)
+		self.campaign = Campaign.objects.create(
+			creator=self.creator_user,
+			title='Draft Campaign To Publish',
+			summary='Ready to go live.',
+			funding_goal_cents=500000,
+			deadline_at=timezone.now() + timezone.timedelta(days=30),
+		)
+		self.url = reverse('campaign-publish', kwargs={'campaign_id': self.campaign.id})
+
+	def test_owner_can_publish_draft_campaign(self):
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data['status'], Campaign.Status.ACTIVE)
+
+	def test_unauthenticated_cannot_publish_campaign(self):
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_non_creator_cannot_publish_campaign(self):
+		self.client.force_authenticate(user=self.backer_user)
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_non_owner_creator_cannot_publish_campaign(self):
+		self.client.force_authenticate(user=self.other_creator_user)
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+		self.assertEqual(response.data['detail'], 'You do not have permission to publish this campaign.')
+
+	def test_cannot_publish_non_draft_campaign(self):
+		self.campaign.status = Campaign.Status.ACTIVE
+		self.campaign.save(update_fields=['status'])
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'Only draft campaigns can be published.')
+
+	def test_cannot_publish_campaign_with_past_deadline(self):
+		self.campaign.deadline_at = timezone.now() - timezone.timedelta(days=1)
+		self.campaign.save(update_fields=['deadline_at'])
+
+		self.client.force_authenticate(user=self.creator_user)
+		response = self.client.post(self.url)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data['detail'], 'Cannot publish a campaign with a past deadline.')
 

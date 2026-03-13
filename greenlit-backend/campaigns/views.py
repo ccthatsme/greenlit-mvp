@@ -10,6 +10,7 @@ from campaigns.services import (
 	CampaignPermissionError,
 	CampaignValidationError,
 	create_campaign,
+	publish_campaign,
 	update_campaign,
 )
 
@@ -54,6 +55,21 @@ class UpdateCampaignView(APIView):
 				funding_goal_cents=request_serializer.validated_data.get('funding_goal_cents'),
 				deadline_at=request_serializer.validated_data.get('deadline_at'),
 			)
+		except CampaignPermissionError as exc:
+			return Response({'detail': str(exc)}, status=status.HTTP_403_FORBIDDEN)
+		except (CampaignValidationError, CampaignConflictError) as exc:
+			return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+		response_serializer = CampaignSummarySerializer(campaign)
+		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class PublishCampaignView(APIView):
+	permission_classes = [IsCreatorUser]
+
+	def post(self, request, campaign_id):
+		try:
+			campaign = publish_campaign(request.user, campaign_id=campaign_id)
 		except CampaignPermissionError as exc:
 			return Response({'detail': str(exc)}, status=status.HTTP_403_FORBIDDEN)
 		except (CampaignValidationError, CampaignConflictError) as exc:
